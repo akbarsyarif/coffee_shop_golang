@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"akbarsyarif/coffeeshopgolang/internal/helpers"
 	"akbarsyarif/coffeeshopgolang/internal/models"
 	"akbarsyarif/coffeeshopgolang/internal/repositories"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/asaskevich/govalidator"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,14 +22,22 @@ func InitializeHandler(r *repositories.ProductRepository) *HandlerProduct {
 }
 
 func (h *HandlerProduct) GetAllProduct(ctx *gin.Context)  {
-	// search := ctx.Query("search")
-	// category := ctx.Query("category")
-	log.Println(ctx.Request.URL.Query())
-	min_price := ctx.Query("min_price")
-	max_price := ctx.Query("max_price")
-	page := ctx.Query("page")
-	if page == "" {
-		page = "1"
+	var params models.ProductParams
+	if err := ctx.ShouldBindQuery(&params); err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal Server Error",
+		})
+	return
+	}
+	if _, err := govalidator.ValidateStruct(params); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"Message" : "Invalid Query Params",
+			"err": err.Error(),
+		})
+		return
+	}
+	if params.Page == "" {
+		params.Page = "1"
 	}
 
 	var res1 int
@@ -35,8 +45,8 @@ func (h *HandlerProduct) GetAllProduct(ctx *gin.Context)  {
 	var err error
 	log.Println(res1, res2)
 	
-	if min_price != "" {
-		res1, err = strconv.Atoi(min_price)
+	if params.Min_price != "" {
+		res1, err = strconv.Atoi(params.Min_price)
 		if err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{
 				"message": "Input Number Only For Price",
@@ -44,8 +54,8 @@ func (h *HandlerProduct) GetAllProduct(ctx *gin.Context)  {
 			return
 		}
 	}
-	if max_price != "" {
-		res2, err = strconv.Atoi(max_price)
+	if params.Max_price != "" {
+		res2, err = strconv.Atoi(params.Max_price)
 		if err != nil {
 			ctx.JSON(http.StatusBadRequest, gin.H{
 				"message": "Input Number Only For Price",
@@ -53,7 +63,7 @@ func (h *HandlerProduct) GetAllProduct(ctx *gin.Context)  {
 			return
 		}
 	}
-	if min_price != "" && max_price != "" {
+	if params.Min_price != "" && params.Max_price != "" {
 		if res1 > res2 {
 			ctx.JSON(http.StatusBadRequest, gin.H{
 				"message": "Min Price Must Be Lower Than Max Price",
@@ -62,7 +72,7 @@ func (h *HandlerProduct) GetAllProduct(ctx *gin.Context)  {
 		}
 	}
 
-	result, err := h.RepositoryGetAllProduct()
+	result, err := h.RepositoryGetAllProduct(&params)
 	if err != nil {
 		log.Println(err)
 		ctx.JSON(http.StatusInternalServerError, err)
@@ -77,9 +87,32 @@ func (h *HandlerProduct) GetAllProduct(ctx *gin.Context)  {
 		return
 	}
 
+	metaRes, err := h.RepositoryCountProduct(&params)
+	if err != nil {
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal Server Error",
+		})
+		return
+	}
+	a:= ctx.Request.URL.String()
+	b:= ctx.Request.Host
+	pages, err := strconv.Atoi(params.Page)
+	metaData := metaConfig(metaRes[0], pages, b, a)
+
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "Success",
-		"result": result,
+		"result": gin.H{
+			"data": result,
+			"meta": gin.H{
+				"page": metaData[0],
+				"total_page": metaData[1],
+				"total_data": metaData[2],
+				"next": metaData[3],
+				"prev": metaData[4],
+			},
+		},
 	})
 }
 
@@ -88,8 +121,16 @@ func (h *HandlerProduct) GetProductDetail(ctx *gin.Context)  {
 	result, err := h.RepositoryGetProductDetail(productId)
 	if err != nil {
 		log.Println(err)
-		ctx.JSON(http.StatusInternalServerError, err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal Server Error",
+		})
 		// panic(err)
+		return
+	}
+	if len(result) == 0 {
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"message": "Product Not Found",
+		})
 		return
 	}
 
@@ -102,40 +143,155 @@ func (h *HandlerProduct) GetProductDetail(ctx *gin.Context)  {
 
 func (h *HandlerProduct) CreateNewProduct(ctx *gin.Context)  {
 	var body models.ProductModel
+	var productId string
 	if err := ctx.ShouldBind(&body); err != nil {
-		ctx.JSON(http.StatusBadRequest, err)
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal Server Error?",
+		})
+		return
 	}
 	log.Println(body)
 
 	result, err := h.RepositoryCreateProduct(&body)
 	if err != nil {
 		log.Println(err)
-		ctx.JSON(http.StatusInternalServerError, err)
-		// panic(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal Server Error",
+		})
 		return
 	}
-	res, _ := result.RowsAffected()
+	for result.Next() {
+		var Id string
+		err = result.Scan(&Id)
+		if Id != "" {
+			log.Println(Id)
+			productId = Id
+			break
+		}
+	}
+	if err != nil {
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal Server Error",
+		})
+		return
+	}
+	result.Rows.Close()
+	
+	var imageUrl string
+
+	cld, err := helpers.InitCloudinary()
+	if  err != nil {
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"Message": "Internal Server Error",
+		})
+		return
+	}
+	formFile, _ := ctx.FormFile("product")
+	if formFile != nil {
+		file, err := formFile.Open()
+		if  err != nil {
+			log.Println(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"Message": "Internal Server Error",
+			})
+			return
+		}
+		defer file.Close()
+		
+		publicId := fmt.Sprintf("%s_%s-%s", "golang", "product", productId)
+		folder := "coffeeshop/product"
+		res, err := cld.Uploader(ctx, file, publicId, folder)
+		if  err != nil {
+			log.Println(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"Message": "Internal Server Error",
+			})
+			return
+		}
+		imageUrl = res.SecureURL
+	}
+
+	_, err = h.RepositoryInsertimage(imageUrl, productId)
+	if  err != nil {
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"Message": "Internal Server Error",
+		})
+		return
+	}
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "Create Product Success",
-		"result": fmt.Sprintf("%d row added to database", res),
+		"result": gin.H{
+			"product_image": imageUrl,
+			"product_name": body.Product_name,
+			"description": body.Description,
+			"price": body.Price,
+		},
 	})
 }
 
 func (h *HandlerProduct) UpdateProduct(ctx *gin.Context)  {
 	var body models.ProductModel
 	productId := ctx.Param("productid")
-	if err := ctx.ShouldBind(&body); err != nil {
-		ctx.JSON(http.StatusBadRequest, err)
+	var imageUrl string
+
+	cld, err := helpers.InitCloudinary()
+	if  err != nil {
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"Message": "Internal Server Error",
+		})
+		return
+	}
+	formFile, _ := ctx.FormFile("product")
+	if formFile != nil {
+		file, err := formFile.Open()
+		if  err != nil {
+			log.Println(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"Message": "Internal Server Error",
+			})
+			return
+		}
+		defer file.Close()
+		
+		publicId := fmt.Sprintf("%s_%s-%s", "golang", "product", productId)
+		folder := "coffeeshop/product"
+		res, err := cld.Uploader(ctx, file, publicId, folder)
+		if  err != nil {
+			log.Println(err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"Message": "Internal Server Error",
+			})
+			return
+		}
+		imageUrl = res.SecureURL
 	}
 
-	result, err := h.RepositoryUpdateProduct(&body, productId)
-	if err.Error() == "Please Input at Least One Change" {
+	if err := ctx.ShouldBind(&body); err != nil {
 		log.Println(err)
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"message": err.Error(),
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal Server Error?",
 		})
-		// panic(err)
+		return
+	}
+	if body.Product_name == "" && body.Description == "" && body.Price == 0 && body.Category == "" && body.Promo == "" && imageUrl == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"message": "Please Input At Least One Change",
+		})
+		return
+	}
+
+	result, err := h.RepositoryUpdateProduct(&body, productId, imageUrl)
+	if err != nil {
+		log.Println(err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"message": "Internal Server Error?",
+		})
 		return
 	}
 	if check, _ := result.RowsAffected(); check == 0 {
@@ -144,18 +300,14 @@ func (h *HandlerProduct) UpdateProduct(ctx *gin.Context)  {
 		})
 		return
 	}
-	if err != nil {
-		log.Println(err)
-		ctx.JSON(http.StatusInternalServerError, err)
-		// panic(err)
-		return
-	}
-	res, _ := result.RowsAffected()
-
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "Update Product Success",
-		"result": fmt.Sprintf("%d row updated in database", res),
+		"result": gin.H{
+			"product_name": body.Product_name,
+			"price": body.Price,
+			"description": body.Description,
+		},
 	})
 }
 
@@ -175,8 +327,9 @@ func (h *HandlerProduct) DeleteProduct(ctx *gin.Context)  {
 		})
 		return
 	}
+	message := fmt.Sprintf("Delete on Product Id %s Success", productId)
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"message": "Delete Product Success",
+		"message": message,
 	})
 }

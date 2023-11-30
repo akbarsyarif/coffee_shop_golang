@@ -12,10 +12,29 @@ import (
 
 type OrderRepository struct {
 	*sqlx.DB
+	// Tx sqlx.Tx
 }
 
 func InitializeOrderRepository(db *sqlx.DB) *OrderRepository {
 	return &OrderRepository{db}
+}
+
+func (r *OrderRepository) RepositoryCountOrder(userId, status string) ([]int, error) {
+	var total_data = []int{}
+	query := `
+		select
+			count(*) as "total_order"
+		from
+			"order" o
+		join
+			status s on o.status_id = s.id
+		where o.users_id = $1 and s."name" like $2
+		`
+	err := r.Select(&total_data, query, userId, status)
+	if err != nil {
+		return nil, err
+	}
+	return total_data, nil
 }
 
 func (r *OrderRepository) RepositoryGetAllOrder() ([]models.OrderModel, error) {
@@ -47,7 +66,7 @@ func (r *OrderRepository) RepositoryGetOrderPerUser(userId, status, page string)
 	if err != nil {
 		return nil, err
 	}
-	offset = (offset - 1) * 6
+	offset = (offset - 1) * 5
 
 	query := `
 			select
@@ -60,7 +79,7 @@ func (r *OrderRepository) RepositoryGetOrderPerUser(userId, status, page string)
 				status s on o.status_id = s.id
 			join
 				shipping sh on o.shipping_id = sh.id
-			where o.users_id = $1 and s."name" like $2
+			where o.users_id = $1 and s."name" like $2 and deleted_at is null
 			`
 	query += ` limit 5 offset $3`
 	// log.Println(query)
@@ -71,7 +90,7 @@ func (r *OrderRepository) RepositoryGetOrderPerUser(userId, status, page string)
 	return result, nil
 }
 
-func (r *OrderRepository) RepositoryGetOrderDetail(orderId string) ([]models.OrderProductModel, error) {
+func (r *OrderRepository) RepositoryGetOrderDetail(orderId, userId string) ([]models.OrderProductModel, error) {
 	result := []models.OrderProductModel{}
 
 	query := `
@@ -94,10 +113,10 @@ func (r *OrderRepository) RepositoryGetOrderDetail(orderId string) ([]models.Ord
 				status st on o.status_id = st.id
 			join
 				shipping sh on o.shipping_id = sh.id
-			where o.id = $1
+			where o.id = $1 and o.users_id = $2 and op.deleted_at is null
 			`
 	// log.Println(query)
-	err := r.Select(&result, query, orderId);
+	err := r.Select(&result, query, orderId, userId);
 	if err != nil {
 		return nil, err
 	}

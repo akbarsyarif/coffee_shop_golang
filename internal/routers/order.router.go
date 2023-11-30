@@ -2,6 +2,7 @@ package routers
 
 import (
 	"akbarsyarif/coffeeshopgolang/internal/handlers"
+	"akbarsyarif/coffeeshopgolang/internal/middlewares"
 	"akbarsyarif/coffeeshopgolang/internal/repositories"
 
 	"github.com/gin-gonic/gin"
@@ -13,12 +14,12 @@ func RouterOrder(g *gin.Engine, db *sqlx.DB) {
 	repository := repositories.InitializeOrderRepository(db)
 	handler := handlers.InitializeOrderHandler(repository)
 
-	route.GET("/", handler.GetAllOrder)
-	route.GET("/:userid", handler.GetOrderPerUser)
-	route.GET("/detail/:orderid", handler.GetOrderDetail)
-	route.POST("/", handler.CreateNewOrder)
-	route.PATCH("/:orderid", handler.UpdateOrder)
-	route.DELETE("/:orderid", handler.DeleteOrder)
+	route.GET("/", middlewares.JWTGate(db, "admin"), handler.GetAllOrder)
+	route.GET("/user", middlewares.JWTGate(db, "user"), handler.GetOrderPerUser)
+	route.GET("/detail/:orderid", middlewares.JWTGate(db, "user"), handler.GetOrderDetail)
+	route.POST("/", middlewares.JWTGate(db, "user"), handler.CreateNewOrder)
+	route.PATCH("/:orderid", middlewares.JWTGate(db, "admin"), handler.UpdateOrder)
+	route.DELETE("/:orderid", middlewares.JWTGate(db, "admin"), handler.DeleteOrder)
 	// route.PATCH("/:productid", handler.UpdateProduct)
 	// route.DELETE("/:productid", handler.DeleteProduct)
 }

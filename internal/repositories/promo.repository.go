@@ -4,6 +4,7 @@ import (
 	"akbarsyarif/coffeeshopgolang/internal/models"
 	"database/sql"
 	"log"
+	"strconv"
 	"strings"
 
 	"github.com/jmoiron/sqlx"
@@ -17,11 +18,31 @@ func InitializePromoRepository(db *sqlx.DB) *PromoRepository {
 	return &PromoRepository{db}
 }
 
-func (r *PromoRepository) RepositoryGetPromo() ([]models.PromoModel, error) {
+func (r *PromoRepository) RepositoryCountPromo() ([]int, error) {
+	var total_data = []int{}
+	query := `
+		select
+			count(*) as "total_promo"
+		from
+			promo
+		`
+	err := r.Select(&total_data, query)
+	if err != nil {
+		return nil, err
+	}
+	return total_data, nil
+}
+
+func (r *PromoRepository) RepositoryGetPromo(page string) ([]models.PromoModel, error) {
 	result := []models.PromoModel{}
-	query := `select id, promo_name, description, discount_type, flat_amount, percent_amount, created_at from promo p order by id asc`
-	
-	err := r.Select(&result, query);
+	offset, err := strconv.Atoi(page)
+	if err != nil {
+		return nil, err
+	}
+	offset = (offset - 1) * 5
+	query := `select id, promo_name, description, discount_type, flat_amount, percent_amount, created_at from promo p order by id asc limit 5 offset $1`
+
+	err = r.Select(&result, query, offset);
 	if err != nil {
 		return nil, err
 	}
@@ -73,10 +94,6 @@ func (r *PromoRepository) RepositoryUpdatePromo(body *models.PromoModel, promoId
 	}
 	query += `, updated_at = now() where id = :id`
 	log.Println(len(query))
-	// if len(query) < 56 {
-	// 	err := errors.New("Please Input at Least One Change")
-	// 	return nil, err
-	// }
 
 	result, err := r.NamedExec(query, filterBody);
 	if err != nil {

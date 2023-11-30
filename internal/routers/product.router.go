@@ -2,6 +2,7 @@ package routers
 
 import (
 	"akbarsyarif/coffeeshopgolang/internal/handlers"
+	"akbarsyarif/coffeeshopgolang/internal/middlewares"
 	"akbarsyarif/coffeeshopgolang/internal/repositories"
 
 	"github.com/gin-gonic/gin"
@@ -15,7 +16,7 @@ func RouterProduct(g *gin.Engine, db *sqlx.DB) {
 
 	route.GET("/", handler.GetAllProduct)
 	route.GET("/:productid", handler.GetProductDetail)
-	route.POST("/", handler.CreateNewProduct)
-	route.PATCH("/:productid", handler.UpdateProduct)
-	route.DELETE("/:productid", handler.DeleteProduct)
+	route.POST("/", middlewares.JWTGate(db, "admin"), handler.CreateNewProduct)
+	route.PATCH("/:productid", middlewares.JWTGate(db, "admin"), handler.UpdateProduct)
+	route.DELETE("/:productid", middlewares.JWTGate(db, "admin"), handler.DeleteProduct)
 }
